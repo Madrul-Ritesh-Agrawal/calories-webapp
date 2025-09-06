@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calorie Calculator</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    h2 { margin-top: 30px; }
+    .section { margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; border-radius: 8px; }
+    label { display: block; margin-top: 8px; }
+    input, select { padding: 5px; margin-top: 5px; width: 100%; max-width: 300px; }
+    table { border-collapse: collapse; margin-top: 10px; width: 100%; }
+    table, th, td { border: 1px solid #ccc; }
+    th, td { padding: 8px; text-align: center; }
+    button { margin-top: 8px; padding: 6px 12px; }
+  </style>
+</head>
+<body>
+  <h1>Calorie Calculator</h1>
+  <div class="section">
+    <h2>User Info</h2>
+    <label>Name: <input type="text" id="userName"></label>
+    <label>Age: <input type="number" id="age"></label>
+    <label>Height (cm): <input type="number" id="height"></label>
+    <label>Weight (kg): <input type="number" id="weight"></label>
+    <label>Gender:
+      <select id="gender">
+        <option value="male">Male</option>
+        <option value="female">Female</option>
+      </select>
+    </label>
+    <label>Activity Level:
+      <select id="activity">
+        <option value="1.2">Sedentary</option>
+        <option value="1.375">Lightly Active</option>
+        <option value="1.55">Moderately Active</option>
+        <option value="1.725">Very Active</option>
+      </select>
+    </label>
+    <label>Goal Weight (kg): <input type="number" id="goalWeight"></label>
+    <label>Months to Goal: <input type="number" id="months"></label>
+    <button onclick="saveUser()">Save User</button>
+    <h3>Load Past User</h3>
+    <select id="userSelect" onchange="loadUser()"></select>
+  </div>
+
+  <div class="section">
+    <h2>Exercises</h2>
+    <label>Date: <input type="date" id="exerciseDate"></label>
+    <label>Exercise Name (Free Text): <input type="text" id="exerciseName"></label>
+    <label>Sets x Reps or Info: <input type="text" id="exerciseSets"></label>
+    <label>Minutes (Optional): <input type="number" id="exerciseMinutes"></label>
+    <label>Calories Burned (Optional, leave blank to auto-calculate): <input type="number" id="exerciseCalories"></label>
+    <button onclick="addExercise()">Add Exercise</button>
+    <input type="file" id="exerciseCSV" accept=".csv" onchange="importExercises(event)" />
+    <table id="exerciseTable">
+      <tr><th>Date</th><th>Name</th><th>Sets x Reps / Info</th><th>Minutes</th><th>Calories Burned</th></tr>
+    </table>
+    <button onclick="exportExercises()">Export Exercises CSV</button>
+  </div>
+
+  <div class="section">
+    <h2>Foods</h2>
+    <label>Date: <input type="date" id="foodDate"></label>
+    <label>Food: <input type="text" id="foodName"></label>
+    <label>Quantity (Optional): <input type="text" id="foodQuantity"></label>
+    <label>Calories per Quantity: <input type="number" id="foodCalories"></label>
+    <button onclick="addFood()">Add Food</button>
+    <input type="file" id="foodCSV" accept=".csv" onchange="importFoods(event)" />
+    <table id="foodTable">
+      <tr><th>Date</th><th>Name</th><th>Quantity</th><th>Calories</th></tr>
+    </table>
+    <button onclick="exportFoods()">Export Foods CSV</button>
+  </div>
+
+  <div class="section">
+    <h2>Results</h2>
+    <button onclick="calculate()">Calculate</button>
+    <div id="results"></div>
+  </div>
+
+<script>
+  let exercises = JSON.parse(localStorage.getItem('exercises') || '[]');
+  let foods = JSON.parse(localStorage.getItem('foods') || '[]');
+  let users = JSON.parse(localStorage.getItem('users') || '{}');
+
+  function saveUser() {
+    const name = document.getElementById('userName').value;
+    if (!name) return;
+    users[name] = {
+      age: document.getElementById('age').value,
+      height: document.getElementById('height').value,
+      weight: document.getElementById('weight').value,
+      gender: document.getElementById('gender').value,
+      activity: document.getElementById('activity').value,
+      goalWeight: document.getElementById('goalWeight').value,
+      months: document.getElementById('months').value
+    };
+    localStorage.setItem('users', JSON.stringify(users));
+    renderUserOptions();
+  }
+
+  function loadUser() {
+    const name = document.getElementById('userSelect').value;
+    if (!name || !users[name]) return;
+    const data = users[name];
+    document.getElementById('userName').value = name;
+    document.getElementById('age').value = data.age;
+    document.getElementById('height').value = data.height;
+    document.getElementById('weight').value = data.weight;
+    document.getElementById('gender').value = data.gender;
+    document.getElementById('activity').value = data.activity;
+    document.getElementById('goalWeight').value = data.goalWeight;
+    document.getElementById('months').value = data.months;
+  }
+
+  function renderUserOptions() {
+    const select = document.getElementById('userSelect');
+    select.innerHTML = '<option value="">--Select User--</option>';
+    Object.keys(users).forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      select.appendChild(opt);
+    });
+  }
+  
+  function estimateCalories(ex, weight) {
+    if (ex.calories) {
+      return parseFloat(ex.calories);
+    }
+    let cal = 0;
+    // Use a better estimation for treadmill based on minutes and a MET value.
+    // A MET value of 8 is a reasonable estimate for running on a treadmill with an incline.
+    // Formula: calories = (MET * 3.5 * weight_kg) / 200 * minutes
+    if (ex.name.toLowerCase().includes('treadmill') && ex.minutes) {
+      const met = 8;
+      cal = (met * 3.5 * weight) / 200 * ex.minutes;
+    } else if (ex.sets) {
+      // Rough estimate for strength if sets text is present
+      cal += weight * 0.05 * 10;
+    } else if (ex.minutes) {
+      // General estimate for other cardio
+      cal += ex.minutes * weight * 0.08;
+    }
+    return cal;
+  }
+
+  function addExercise() {
+    const date = document.getElementById('exerciseDate').value;
+    const name = document.getElementById('exerciseName').value;
+    const sets = document.getElementById('exerciseSets').value;
+    const minutes = parseFloat(document.getElementById('exerciseMinutes').value);
+    const calories = document.getElementById('exerciseCalories').value;
+    if (!date || !name) return;
+    exercises.push({date, name, sets, minutes, calories});
+    localStorage.setItem('exercises', JSON.stringify(exercises));
+    renderExercises();
+  }
+
+  function addFood() {
+    const date = document.getElementById('foodDate').value;
+    const name = document.getElementById('foodName').value;
+    const quantity = document.getElementById('foodQuantity').value;
+    const calories = parseFloat(document.getElementById('foodCalories').value);
+    if (!date || !name || !calories) return;
+    foods.push({date, name, quantity, calories});
+    localStorage.setItem('foods', JSON.stringify(foods));
+    renderFoods();
+  }
+
+  function renderExercises() {
+    const table = document.getElementById('exerciseTable');
+    table.innerHTML = '<tr><th>Date</th><th>Name</th><th>Sets x Reps / Info</th><th>Minutes</th><th>Calories Burned</th></tr>';
+    const weight = parseFloat(document.getElementById('weight').value) || 70;
+    exercises.forEach(ex => {
+      const cal = estimateCalories(ex, weight);
+      const row = table.insertRow();
+      row.innerHTML = `<td>${ex.date}</td><td>${ex.name}</td><td>${ex.sets || ''}</td><td>${ex.minutes || ''}</td><td>${cal.toFixed(1)}</td>`;
+    });
+  }
+
+  function renderFoods() {
+    const table = document.getElementById('foodTable');
+    table.innerHTML = '<tr><th>Date</th><th>Name</th><th>Quantity</th><th>Calories</th></tr>';
+    foods.forEach(f => {
+      const row = table.insertRow();
+      row.innerHTML = `<td>${f.date}</td><td>${f.name}</td><td>${f.quantity || ''}</td><td>${f.calories}</td>`;
+    });
+  }
+
+  function calculate() {
+    const name = document.getElementById('userName').value;
+    if (!name || !users[name]) return;
+    const data = users[name];
+    const age = parseFloat(data.age);
+    const height = parseFloat(data.height);
+    const weight = parseFloat(data.weight);
+    const gender = data.gender;
+    const activity = parseFloat(data.activity);
+    const goalWeight = parseFloat(data.goalWeight);
+    const months = parseFloat(data.months);
+
+    let BMR = gender === 'male' ? 10*weight + 6.25*height - 5*age + 5 : 10*weight + 6.25*height - 5*age - 161;
+    const TDEE = BMR * activity;
+
+    let exerciseCals = 0;
+    exercises.forEach(ex => { exerciseCals += estimateCalories(ex, weight); });
+
+    let foodCals = 0;
+    foods.forEach(f => { foodCals += f.calories; });
+
+    const dailyDeficit = (BMR + exerciseCals) - foodCals;
+    const weightDiff = weight - goalWeight;
+    const requiredDeficit = (weightDiff * 7700) / (months * 30);
+
+    document.getElementById('results').innerHTML = `
+      <p><b>User:</b> ${name}</p>
+      <p><b>BMR:</b> ${BMR.toFixed(1)} kcal/day</p>
+      <p><b>Maintenance (TDEE):</b> ${TDEE.toFixed(1)} kcal/day</p>
+      <p><b>Exercise Calories Burned:</b> ${exerciseCals.toFixed(1)}</p>
+      <p><b>Food Calories Eaten:</b> ${foodCals.toFixed(1)}</p>
+      <p><b>Daily Deficit:</b> ${dailyDeficit.toFixed(1)}</p>
+      <p><b>Required Daily Deficit to hit goal:</b> ${requiredDeficit.toFixed(1)}</p>
+    `;
+  }
+
+  // Helper functions for CSV import/export
+  function exportToCsv(filename, rows) {
+    const csvContent = "data:text/csv;charset=utf-8," + rows.map(e => e.join(",")).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  function exportExercises() {
+    const headers = ["Date", "Name", "Sets x Reps / Info", "Minutes", "Calories Burned"];
+    const rows = exercises.map(ex => [ex.date, ex.name, ex.sets || '', ex.minutes || '', ex.calories || '']);
+    exportToCsv("exercises.csv", [headers, ...rows]);
+  }
+
+  function exportFoods() {
+    const headers = ["Date", "Name", "Quantity", "Calories"];
+    const rows = foods.map(f => [f.date, f.name, f.quantity || '', f.calories]);
+    exportToCsv("foods.csv", [headers, ...rows]);
+  }
+
+  function importCsv(event, type) {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const text = e.target.result;
+      const lines = text.split('\n').slice(1);
+      const importedData = lines.filter(line => line.trim() !== '').map(line => {
+        const values = line.split(',');
+        if (type === 'exercises') {
+          return {
+            date: values[0],
+            name: values[1],
+            sets: values[2],
+            minutes: parseFloat(values[3]),
+            calories: parseFloat(values[4])
+          };
+        } else if (type === 'foods') {
+          return {
+            date: values[0],
+            name: values[1],
+            quantity: values[2],
+            calories: parseFloat(values[3])
+          };
+        }
+      });
+      if (type === 'exercises') {
+        exercises = [...exercises, ...importedData];
+        localStorage.setItem('exercises', JSON.stringify(exercises));
+        renderExercises();
+      } else if (type === 'foods') {
+        foods = [...foods, ...importedData];
+        localStorage.setItem('foods', JSON.stringify(foods));
+        renderFoods();
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function importExercises(event) {
+    importCsv(event, 'exercises');
+  }
+
+  function importFoods(event) {
+    importCsv(event, 'foods');
+  }
+
+  renderExercises();
+  renderFoods();
+  renderUserOptions();
+</script>
+</body>
+</html>
